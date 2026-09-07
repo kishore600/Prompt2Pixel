@@ -7,7 +7,8 @@ import zlib
 def write_chunk(f, chunk_type, data):
     f.write(struct.pack('>I', len(data)))
     f.write(chunk_type)
-    crc = zlib.crc32(data, crc) & 0xffffffff
+    f.write(data)
+    crc = zlib.crc32(chunk_type + data) & 0xffffffff
     f.write(struct.pack('>I', crc))
 
     

@@ -1,15 +1,321 @@
-Phase 0 — set up the environment (before any code)
-1. Confirm you have Python 3.10+: python --version
-2. Create a virtual environment so dependencies stay isolated: python -m venv venv
-3. Activate it (PowerShell): .\venv\Scripts\Activate.ps1
-4. Install NumPy — the only runtime dependency the whole project allows: pip install numpy pytest
+===========================================================
+PROMPT2PIXEL — FULL PHASE BREAKDOWN
+(source: ReadME.md "Recommendations" + full technical detail from
+sections A-J. This file expands each phase into steps + the concrete
+knowledge you gain from building it. See progress.txt for exact
+current position within this roadmap.)
+===========================================================
 
-Phase 1 — Procedural renderer + PNG I/O (README's own Phase 1, weeks 1–3)
-This is the recommended starting point because it needs zero training and gives you a working "prompt → image" loop almost immediately. The suggested build order, smallest piece first:
-1. png.py — the PNG writer (chunk framing + zlib compression), verified against zlib.crc32
-2. Basic drawing primitives — Bresenham line, midpoint circle
-3. Perlin noise + fBm (for terrain/clouds)
-4. SDF primitives + smooth-min blending (for shapes)
-5. HSV↔RGB color + palette-from-prompt mapping
-6. Scene compositor (layer everything with alpha-over)
-7. Bitmap font for text captions
+-----------------------------------------------------------
+PHASE 0 — Environment setup (not a "real" project phase, just prep)
+-----------------------------------------------------------
+Steps:
+  1. Confirm Python 3.10+: python --version
+  2. Create a virtual environment: python -m venv venv
+  3. Activate it (PowerShell): .\venv\Scripts\Activate.ps1
+  4. Install the ONLY runtime dependency the whole project allows:
+     pip install numpy pytest
+
+Knowledge gained: nothing project-specific — just an isolated,
+reproducible environment so the "zero dependency except NumPy" rule
+is actually enforceable and testable.
+
+
+-----------------------------------------------------------
+PHASE 1 — Procedural renderer + PNG I/O  (weeks 1-3, README's own Phase 1)
+-----------------------------------------------------------
+GOAL: needs zero training, gives a working "prompt -> image" loop almost
+immediately. This is the phase we are currently in.
+
+BENCHMARK TO PROCEED (from README): a prompt typed in produces a
+recognizable scene PNG with a text caption, and the SAME prompt always
+produces the SAME image (fully deterministic). This alone satisfies
+the core "prompt -> image without packages" goal and de-risks the
+whole rest of the project.
+
+Steps, smallest piece first:
+
+  1. png.py — the PNG writer (chunk framing + zlib compression)
+     - Write the 8-byte PNG signature: \x89PNG\r\n\x1a\n
+     - Write write_chunk(f, chunk_type, data): length(4B BE) + type(4B)
+       + data + CRC32(4B BE) over (type+data)
+     - Assemble IHDR (13 bytes: width, height 4B each BE; bit_depth=8;
+       color_type=2 for RGB; compression=0; filter=0; interlace=0)
+     - Scanline filtering: prepend a filter-type byte (0=None) to each
+       row of raw pixel bytes before compression
+     - zlib.compress the filtered row buffer -> wrap as one IDAT chunk
+     - Write IEND (empty data) to close the file
+     Knowledge gained: binary file formats, big-endian byte packing
+     (struct), CRC-32 checksums (fingerprinting/corruption detection),
+     how PNG's chunk-based container format works, what "compression"
+     actually means at the byte level (zlib/DEFLATE), and why every
+     image file you've ever opened is just a structured byte stream.
+
+  2. Basic drawing primitives — Bresenham line, midpoint circle
+     - Bresenham line: integer-only algorithm, tracks an error term,
+       steps y only when error crosses a threshold — no floating point
+     - Midpoint circle: decision parameter picks E vs NE pixel using
+       8-way symmetry (draw 1/8 of the circle, mirror the rest)
+     Knowledge gained: how vector shapes become individual lit pixels
+     without any floating-point math or drawing library — the actual
+     algorithms inside every graphics library you've ever used.
+
+  3. Perlin noise + fBm (fractal Brownian motion)
+     - Perlin: assign pseudorandom gradient vectors to an integer
+       lattice; dot-product each corner's gradient with the offset to
+       the query point; blend the 4 corner values with the quintic
+       fade curve 6t^5-15t^4+10t^3 (chosen for smooth C2-continuous
+       transitions with no visible cell-boundary creases)
+     - fBm: sum multiple "octaves" of noise at increasing frequency
+       and decreasing amplitude to get natural-looking detail (terrain,
+       clouds)
+     Knowledge gained: how "natural-looking randomness" is actually
+     generated deterministically (same seed -> same noise every time),
+     interpolation/smoothing math, and the base technique behind
+     nearly all procedural terrain/texture generation in games and VFX.
+
+  4. SDF (signed distance field) primitives + smooth-min blending
+     - A shape = a function returning signed distance to its surface
+       (negative = inside). Circle: length(p)-r. Box: a slightly more
+       involved max/min formula.
+     - smooth-min (smin): blends two shapes' distance fields so they
+       merge organically instead of with a hard seam — controlled by
+       a blend-width parameter k
+     - Compose scenes: min() = union, max(-a,b) = subtraction,
+       smin() = organic join
+     Knowledge gained: an entirely different, purely mathematical way
+     to represent shapes (vs. pixel/vector drawing) that composes
+     cleanly and underlies modern real-time rendering techniques
+     (raymarching, used in demoscene/shader art).
+
+  5. HSV<->RGB color math + palette-from-prompt mapping
+     - HSV->RGB and RGB->HSV conversion formulas (hue/saturation/value
+       vs red/green/blue)
+     - Gradient interpolation between palette colors
+     - Map prompt keywords -> base hue + color harmony rule
+       (complementary = +180 degrees, analogous = +-30, triadic = +-120)
+     Knowledge gained: how color spaces relate to each other and why
+     HSV is easier to reason about for "mood"/"palette" than raw RGB;
+     how to turn words into deterministic visual color choices.
+
+  6. Scene compositor (alpha-over layering)
+     - Alpha blending formula: out = src*alpha + dst*(1-alpha)
+     - Build a scene back-to-front: sky gradient -> distant terrain
+       (with depth fog) -> midground -> water -> clouds, each layered
+       with alpha-over
+     Knowledge gained: how every image-editing "layers" panel actually
+     works under the hood — compositing math, draw order, and how
+     depth/fog effects are faked with simple exponential blending.
+
+  7. Bitmap font (text captions)
+     - Each glyph = a small array of bytes, each bit = one pixel
+       (e.g. an 8x8 glyph is 8 bytes)
+     - Blit: for each set bit in the glyph, write the text color into
+       the pixel buffer at that position
+     Knowledge gained: how text rendering works at the most primitive
+     level, before any font-hinting/anti-aliasing/vector outlines are
+     involved — this is literally how old computers and printers drew
+     characters.
+
+END OF PHASE 1 — WHAT YOU WILL ACTUALLY HAVE:
+A command-line tool (or function) where you type a prompt like
+"sunset over mountains with clouds", and it deterministically produces
+a real, valid .png file: a rendered scene (sky/terrain/water/clouds
+built from noise + SDFs + color rules driven by the prompt's keywords)
+with a text caption drawn on it — using ONLY Python's standard library
+and NumPy, no image/graphics packages at all. Same prompt in = pixel-
+identical PNG out, every time. This is the deliverable that proves the
+entire "from scratch" premise works before any machine learning begins.
+
+
+-----------------------------------------------------------
+PHASE 2 — Synthetic dataset generation  (week 4)
+-----------------------------------------------------------
+GOAL: reuse everything from Phase 1 as a data generator instead of a
+one-off renderer.
+
+Steps:
+  1. Define templated prompts (e.g. "a {color} {shape} at {position}")
+     with a fixed vocabulary of attributes
+  2. Run the Phase-1 renderer thousands of times over generated prompt
+     variations, saving each (image, structured-label) pair
+  3. Store the resulting dataset in a simple format you can reload
+     (e.g. a folder of PNGs + a labels file, or a packed binary blob
+     similar to the MNIST IDX format you'll learn to read in Phase 3)
+
+Knowledge gained: how to turn a generator into a labeled dataset
+pipeline (the same pattern used for synthetic data / data augmentation
+in real ML pipelines); removes any dependency on downloading external
+datasets, since the labels are exactly known (you generated them).
+This is the project's "research hook" — a self-contained, download-free
+experiment bridging Stage 1 (procedural) and Stage 2 (learned).
+
+
+-----------------------------------------------------------
+PHASE 3 — NumPy autograd + layers  (weeks 5-7)
+-----------------------------------------------------------
+GOAL: build your own miniature deep-learning engine from scratch —
+no PyTorch/TensorFlow, just NumPy arrays and hand-derived math.
+
+BENCHMARK: train a small classifier to >95% accuracy on MNIST — this
+proves the engine itself is correct before attempting anything
+generative (much easier to debug a classifier than a generator).
+
+Steps:
+  1. Dense (fully-connected) layer: forward z = xW + b; backward via
+     chain rule: dW = x^T * dz, db = sum(dz), dx = dz * W^T
+  2. Activation functions + their derivatives: ReLU, LeakyReLU,
+     Sigmoid, tanh, GELU, SiLU/Swish
+  3. Softmax + cross-entropy loss, and the elegant simplification that
+     the gradient w.r.t. logits is just (predicted - true) — derive
+     this yourself via the quotient rule to see why it cancels so
+     cleanly
+  4. MSE loss for regression-style outputs
+  5. Convolution via im2col: unfold sliding windows into columns,
+     turn convolution into one big matrix multiply (GEMM); implement
+     the backward pass (dW, and col2im for dX)
+  6. Normalization layers: BatchNorm (forward + the closed-form
+     backward), LayerNorm, GroupNorm — and why each is used in
+     different situations (batch size, attention, etc.)
+  7. Optimizers, in order of sophistication: SGD -> Momentum ->
+     RMSProp -> Adam (with bias correction, and *why* bias correction
+     is needed) -> AdamW (decoupled weight decay)
+  8. Weight initialization: Xavier/Glorot (tanh/sigmoid) vs He/Kaiming
+     (ReLU) — derive why ReLU needs double the variance of Xavier
+  9. Numerical stability tricks: log-sum-exp trick, epsilon in every
+     denominator, gradient clipping by global norm
+  10. Verify EVERY layer with numerical gradient checking:
+      |analytic_gradient - numerical_gradient| < 1e-6
+
+Knowledge gained: this is the deepest phase conceptually — you will
+understand backpropagation, matrix calculus, why specific
+initialization/normalization/optimizer choices exist (not just "use
+Adam because everyone does"), and you'll have built (in miniature)
+the same kind of engine that PyTorch/TensorFlow are built on top of.
+This phase is what makes Phase 4/5 possible at all.
+
+
+-----------------------------------------------------------
+PHASE 4 — Train the VAE baseline  (weeks 8-9)
+-----------------------------------------------------------
+GOAL: your first real generative model — a Variational Autoencoder,
+recommended because a working framework-free pure-NumPy reference
+exists and it's CPU-friendly (minutes to a couple hours to train).
+
+BENCHMARK: recognizable class-conditional 28x28 samples, with both the
+KL-divergence loss and reconstruction loss curves decreasing over
+training.
+
+Steps:
+  1. Understand the ELBO (Evidence Lower Bound): reconstruction term
+     minus a KL-divergence regularization term pulling the learned
+     latent distribution toward a standard normal N(0,I)
+  2. Implement the reparameterization trick: sample z = mu + sigma*eps
+     (eps ~ N(0,I)) so gradients can flow through mu and sigma instead
+     of through a non-differentiable random sample
+  3. Implement the closed-form Gaussian KL divergence formula
+     (why Gaussians specifically are used: this KL term has an exact,
+     differentiable closed form — no approximation needed)
+  4. Build encoder (image -> mu, sigma) and decoder (z -> image)
+     networks using your Phase-3 layers
+  5. For conditional VAE: concatenate the class label (one-hot) to
+     both the encoder input and the decoder's latent vector
+  6. Train on MNIST/Fashion-MNIST (loaded via the IDX format — no
+     PIL/pandas needed) or on your own Phase-2 synthetic dataset
+  7. Track KL and reconstruction loss curves; sample from the trained
+     decoder to visually check reconstruction quality
+
+Knowledge gained: what a generative model actually is (learning a
+distribution you can sample new, novel outputs from, not just
+classify inputs); the specific VAE math (ELBO, KL, reparameterization)
+that also underlies more advanced generative models; how to read
+training curves to diagnose whether a generative model is learning
+correctly.
+
+
+-----------------------------------------------------------
+PHASE 5 — Conditioning + (reach goal) diffusion  (weeks 10-13)
+-----------------------------------------------------------
+GOAL: make generation controllable (choose WHAT class/attribute to
+generate), then attempt the much harder DDPM (diffusion) model if time
+and compute allow.
+
+THRESHOLD TO ATTEMPT DDPM: only if your Phase-3 conv/backward is fast
+enough to do ~10,000 gradient steps overnight on your CPU. Otherwise,
+stay with the VAE/GAN and present DDPM as "fully derived but future
+work" in your paper — this is a legitimate, expected outcome, not a
+failure.
+
+Steps:
+  1. Add FiLM (Feature-wise Linear Modulation) conditioning to the VAE:
+     predict a per-channel scale (gamma) and shift (beta) from the
+     condition, apply gamma*h + beta after normalization
+  2. (Reach) Understand DDPM's forward noising process: closed-form
+     jump to any timestep t via x_t = sqrt(alpha_bar_t)*x0 +
+     sqrt(1-alpha_bar_t)*noise
+  3. (Reach) Understand the simplified training objective: predict the
+     noise that was added, trained with plain MSE loss — this is what
+     makes diffusion models tractable to train
+  4. (Reach) Implement a tiny denoiser network (small MLP or 2-level
+     U-Net) for 28x28 images
+  5. (Reach) Implement DDIM sampling (deterministic, skips timesteps —
+     50 DDIM steps approximate 1000 DDPM steps, critical for CPU speed)
+  6. (Reach) Implement classifier-free guidance: train with the
+     condition randomly dropped, then extrapolate between conditioned
+     and unconditioned predictions at sampling time for stronger
+     prompt adherence
+
+Knowledge gained: how modern diffusion models (Stable Diffusion, DALL-E
+2, etc.) actually work mathematically, from first principles, including
+why specific design choices exist (noise schedules, guidance weight,
+DDIM's speedup trick). Even attempting this — regardless of whether
+training succeeds on CPU — gives you a working understanding most
+practitioners only get from reading papers, not from building it.
+
+
+-----------------------------------------------------------
+PHASE 6 — Evaluation + paper  (weeks 14-16)
+-----------------------------------------------------------
+GOAL: rigorously evaluate what you built and write it up.
+
+Steps:
+  1. Implement evaluation metrics in NumPy: MSE, PSNR, SSIM (structural
+     similarity — combines luminance/contrast/structure comparison)
+  2. Implement a "proxy FID" (true FID needs a pretrained Inception
+     network, which is against the zero-dependency rule) — instead,
+     compute Frechet distance between Gaussians fit to raw-pixel or
+     PCA feature statistics; explicitly note this is not comparable to
+     published FID scores
+  3. Diversity check: mean pairwise distance among generated samples
+  4. Memorization check: nearest-neighbor distance from each generated
+     sample to the training set (if too close, the model is just
+     copying training data instead of generating)
+  5. Run ablations: linear vs cosine noise schedule (if you attempted
+     diffusion), guidance weight comparisons, VAE vs GAN if you tried
+     both
+  6. Write up the paper: abstract, introduction, related work, method,
+     experiments, results, limitations, conclusion, references (full
+     structure and citation list already listed in ReadME.md section I)
+
+Knowledge gained: how to rigorously evaluate a generative model (not
+just "the samples look okay"), the honest limitations of proxy metrics
+when you can't use pretrained models, and how to communicate a
+from-scratch technical project as a proper research write-up.
+
+
+===========================================================
+BIG PICTURE: WHAT EACH PHASE ADDS ON TOP OF THE LAST
+===========================================================
+Phase 1: prompt -> deterministic procedural image (pure math, no ML)
+Phase 2: Phase 1 becomes a labeled dataset factory
+Phase 3: you now have your own working mini deep-learning framework
+Phase 4: your framework can train a real generative model (VAE)
+Phase 5: that model becomes controllable (conditioning), and
+         optionally you attempt the state-of-the-art technique (diffusion)
+Phase 6: everything gets measured honestly and written up
+
+Only Phase 1 is required to get a working "type a prompt, get a PNG"
+experience — that's the whole point of it being first and having its
+own go/no-go benchmark. Phases 2-6 are what turn that from a fun
+procedural toy into an actual from-scratch generative-AI research
+project.
