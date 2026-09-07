@@ -1,0 +1,154 @@
+PROMPT2PIXEL — MENTORING SESSION PROGRESS
+(resume file — if starting a new Claude Code session, say "read .claude/progress.txt and continue mentoring me from where I left off")
+
+===========================================================
+WORKING AGREEMENT (how this session operates — read first)
+===========================================================
+- User is a pure beginner to this project's subject matter (binary formats,
+  procedural graphics, NumPy internals). Explanations must start from
+  fundamentals, no unexplained jargon.
+- User is writing ALL project code themselves. Claude acts as mentor only:
+  explains concepts, gives specs/checklists, reviews code the user pastes
+  in — Claude does NOT write project code files.
+- Claude must ask permission before taking any file/tool action (creating,
+  editing, deleting files, running commands) — nothing automatic.
+- Reference doc for the whole project: ReadME.md at repo root (full
+  research blueprint — architecture, math, phased roadmap, citations).
+
+===========================================================
+PROJECT OVERVIEW
+===========================================================
+Prompt2Pixel: a from-scratch text-to-image system in pure Python + NumPy
+(no PyTorch/TF/PIL). Two stages:
+  Stage 1 — deterministic procedural renderer (prompt keywords -> noise/SDF/
+            color scene, zero training required)
+  Stage 2 — small class-conditional generative model trained from scratch
+            in NumPy (VAE recommended baseline; GAN second choice; DDPM is
+            the ambitious reach goal with no existing pure-NumPy reference)
+
+===========================================================
+ROADMAP (from ReadME.md, section "Recommendations")
+===========================================================
+Phase 0 — Environment setup
+  1. Confirm Python 3.10+: python --version
+  2. Create venv: python -m venv venv
+  3. Activate (PowerShell): .\venv\Scripts\Activate.ps1
+  4. Install deps: pip install numpy pytest
+
+Phase 1 — Procedural renderer + PNG I/O (current phase, weeks 1-3 in README)
+  Build order, smallest piece first:
+  1. png.py — PNG writer (chunk framing + zlib compression)   <-- IN PROGRESS
+  2. Bresenham line + midpoint circle (drawing primitives)
+  3. Perlin noise + fBm (terrain/cloud texture)
+  4. SDF primitives + smooth-min blending (shapes)
+  5. HSV<->RGB color + palette-from-prompt mapping
+  6. Scene compositor (alpha-over layering)
+  7. Bitmap font (text captions)
+  Benchmark to proceed to Phase 2: prompt -> recognizable scene PNG with a
+  text caption, fully deterministic per prompt.
+
+(Later phases — not started yet — Phase 2 synthetic dataset gen, Phase 3
+NumPy autograd/layers, Phase 4 VAE training, Phase 5 conditioning + reach
+DDPM, Phase 6 evaluation + paper. Full detail in ReadME.md.)
+
+===========================================================
+CONCEPTS ALREADY TAUGHT (user has confirmed understanding)
+===========================================================
+- Bits/bytes: 8 bits = 1 byte = value 0-255.
+- Hex notation: base 16, two hex digits = one byte. \x89 = 0x89 = 137.
+- ASCII: byte-value-to-character lookup table (e.g. 80='P', 78='N', 71='G').
+- The PNG 8-byte signature \x89PNG\r\n\x1a\n and WHY each byte exists:
+    byte1 \x89 (137, >127)  -> catches old 7-bit-only transfers stripping
+                                the high bit
+    bytes2-4 "PNG"          -> human-readable identifier
+    bytes5-6 \r\n (CR LF)   -> catches text-mode line-ending translation
+                                corrupting binary data (Mac=CR, Unix=LF,
+                                Windows=CRLF; PNG is binary, not text)
+    byte7 \x1a (26)         -> old DOS "Ctrl-Z" EOF marker; catches naive
+                                DOS tools truncating at this byte / catches
+                                transfer truncation
+    byte8 \n                -> catches the opposite line-ending bug
+- Big-endian vs little-endian: byte order for multi-byte numbers.
+  Big-endian = most-significant byte first. PNG always uses big-endian.
+  0x12345678 stored big-endian = bytes [12,34,56,78].
+- CRC-32: a checksum "fingerprint" of a data block; recompute on read and
+  compare to stored value to detect corruption (not tamper-proof, that's
+  what cryptographic hashes are for). zlib.crc32() computes PNG's exact
+  variant already.
+- PNG chunk structure: [4-byte length][4-byte type][data][4-byte CRC]
+    - length = big-endian count of DATA bytes only (not type/self/crc)
+    - type = 4 ASCII bytes, e.g. b'IHDR'
+    - CRC computed over (type + data) as one continuous stream, e.g.:
+        crc = zlib.crc32(chunk_type)
+        crc = zlib.crc32(data, crc) & 0xffffffff
+- The three chunks needed for a minimal PNG:
+    IHDR (13 bytes: width,height 4B each, bit_depth,color_type,compression,
+          filter,interlace 1B each; for simple RGB: depth=8,color_type=2,
+          rest=0)
+    IDAT (zlib-compressed pixel data)
+    IEND (zero-length, marks end of file)
+- Scanline filtering: every row gets 1 extra leading byte saying "how was
+  this row filtered" BEFORE compression. Filter 0 = None = just prepend
+  0x00 to each row (always valid, simplest). Filters 1-4 (Sub/Up/Average/
+  Paeth) improve compression via neighbor-byte prediction — optimization,
+  not required for correctness.
+- struct.pack('>I', n): converts a Python int into 4 raw bytes, big-endian
+  ('>' = big-endian, 'I' = unsigned 4-byte int). Used for both the length
+  field and the CRC field of a chunk.
+
+===========================================================
+CURRENT STATUS / WHERE WE LEFT OFF
+===========================================================
+File being written: png.py (location TBD by user — not yet created on disk
+by either party; no project scaffold currently exists, user is building
+by hand).
+
+Active task given to user: write ONE function themselves —
+
+    def write_chunk(f, chunk_type, data):
+        ...
+
+Spec (4 steps, in order, all written to open file f):
+  1. Write len(data) as 4 bytes big-endian  -> struct.pack('>I', len(data))
+  2. Write chunk_type as-is (bytes, e.g. b'IHDR')
+  3. Write data as-is
+  4. Compute CRC over (chunk_type + data) using the two-call zlib.crc32
+     pattern above, write as 4 bytes big-endian via struct.pack('>I', crc)
+
+Status: user has NOT yet pasted this code back for review.
+
+===========================================================
+NEXT STEPS (in order)
+===========================================================
+1. User writes write_chunk(f, chunk_type, data) and pastes it in for review.
+2. Mentor reviews (does not rewrite) — check struct.pack usage, CRC
+   two-call chaining, byte-vs-str type correctness.
+3. Use write_chunk to assemble a MINIMAL valid PNG: signature + IHDR
+   (13-byte header, no pixel data yet) + IEND. Open it in a real image
+   viewer to confirm the file is structurally valid (will show as a blank/
+   empty image, that's expected — proves the chunk plumbing works).
+4. Implement scanline filtering (filter type 0 only — prepend 0x00 to
+   each row of raw pixel bytes).
+5. zlib.compress the filtered buffer, wrap it as one IDAT chunk via
+   write_chunk.
+6. Assemble signature + IHDR + IDAT + IEND -> first real PNG with actual
+   pixel data. Verify visually.
+7. Optional depth exercise: reimplement CRC-32 bitwise (table-driven) from
+   first principles and assert it matches zlib.crc32() as ground truth.
+8. Once png.py works end-to-end, move to roadmap item 2 (Bresenham line +
+   midpoint circle) — mentor will re-explain in full before user writes it,
+   same teach-then-write-then-review pattern.
+
+===========================================================
+NOTES ON PRIOR SESSION EVENTS (context, not action items)
+===========================================================
+- Earlier in this session Claude scaffolded a full pixelforge/ package
+  tree automatically (per README's suggested repo layout) before
+  realizing the user wanted a hands-on mentor mode instead. That scaffold
+  was deleted at user's request — project directory currently contains
+  only ReadME.md, LICENSE, .gitignore, error-log.json, and .claude/.
+  Do not recreate the scaffold unless the user explicitly asks for it.
+- User maintains their own raw copies of mentor explanations in
+  .claude/notes.txt and .claude/Phases.txt (manually pasted, some text
+  loss from copy/paste). This progress.txt is the clean, authoritative
+  summary — prefer this file when resuming.

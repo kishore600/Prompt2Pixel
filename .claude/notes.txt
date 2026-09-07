@@ -1,0 +1,109 @@
+Bits and bytes — the absolute foundation
+Group 8 bits together and you get a byte — a byte can represent any number from 0 to 255 (since 2⁸ = 256 possible combinations).
+
+Hexadecimal — why you see things like \x89
+Writing byte values in plain decimal (0–255) is clunky to read in bulk, so programmers use hexadecimal (base 16) instead: digits 0-9 then a-f for 10-15. Two hex digits exactly represent one byte (since 16×16 = 256).
+
+\x89 means "the byte whose value in hex is 89" — that's decimal 137. The \x is just Python's way of writing "the next two characters are a hex byte value" inside a string, e.g. b'\x89'.
+
+So when I wrote the PNG signature as \x89PNG\r\n\x1a\n, that's 8 individual bytes:
+
+│ byte │ value (hex) │ value (decimal) │    what it looks like     │
+│ 1     │ 89          │ 137             │ not a printable character │
+│ 2    │ 50          │ 80              │ the letter P              │
+│ 3    │ 4E          │ 78              │ the letter N              │
+│ 4    │ 47          │ 71              │ the letter G              │
+│ 5    │ 0D          │ 13              │ CR (carriage return)      │
+│ 6    │ 0A          │ 10              │ LF (line feed)            │
+│ 7    │ 1A          │ 26              │ DOS EOF (Ctrl-Z)          │
+│ 8    │ 0A          │ 10              │ LF again                  │
+
+8 Bytes :- \x89PNG\r\n\x1a\n
+
+Byte 1 (\x89, decimal 137) — catches "7-bit" corruption.
+A byte has 8 bits, giving values 0–255. Some very old text-transfer systems only bothered to send the lower 7 bits of each byte (values 0-127), because that's all plain ASCII text needs — they'd chop off the 8th bit ("high bit") thinking it was safe, since real text never used it. 137 is above 127, meaning its high bit is set to 1. If some old/buggy tool strips that high bit, byte 1 turns into a different value, and PNG readers can immediately tell "this file got mangled in transit" because the first byte doesn't match what's expected.
+
+Bytes 5-6 (\r\n, i.e. CR then LF) — catches line-ending translation.     This is about how diff"end of line" in a text file:
+- Old Mac: just CR
+- Unix/Linux/modern Mac: just LF (\n)
+- Windows: both CR and LF together (\r\n)
+Historically, when sofmode" (assuming it'shuman-readable text), it would sometimes "helpfully" rewrite line endings to match the local OS's convention — e.g., turning \r\n into just \n, or vice versa. That's finPNG is binary data, not
+text — if some careles "fixed" the lineendings, it would corrupt the image data. So the signature deliberately includes a \r\n pair right up front: if a tool has been silently doing this translation, this pair gets mangled, and you can detect the
+corruption immediatelyew bytes.
+
+Byte 7 (\x1a, decimal 26) — catches truncation, specifically on old DOS systems.
+Ancient MS-DOS text files didn't reliably store their exact length — some programs, when displaying a text file, would just read bytes until they hit this specific byte (26, historically called "Ctrl-Z" or "SUB"), and treat that as "end of file, stop reading here," even if there was more data after it. By deliberately putting this byte in the signature, PNG guarantees: if some old DOS tool naively tries to type or display a PNG file thinking it's text, it stops right there instead of dumping garbage binary data to your screen. It's also a second truncation check — if a transfer got cut short exactly here, you'd notice.
+
+Byte 8 (\n) — catches
+Symmetric to bytes 5-6: this catches tools that go the other direction and insert/strip line feeds.
+
+So the whole 8-byte siry byte is a deliberate booby-trap for a specific historical file-corruption bug, chosen by the PNG designers in the 1990s when file transfers between different systems were genuinely unreliable.
+
+Big-endian
+Big-endian is a way of storing multi-byte data in computer memory where the most significant byte (MSB) is stored first (at the lowest memory address).
+0x12345678 = four bytes 12 34 56 78
+
+Big-endian → Big byte first.= 12 34 56 78
+Little-endian → Little byte first. = 78 56 34 12
+
+Real-world Usage
+Big-endian
+Common in network protocols (often called network byte order).
+Used by some processors and systems.
+
+Little-endian
+Used by most modern Intel and AMD processors (x86/x64).
+
+CRC (Cyclic Redundancy Check)
+think of it as a fingerprint of a chunk of data. You run the data through a specific math formula and get back a 4-byte number. Whoever wrote the file computes this fingerprint and stores it. 
+Whoever reads the file later recomputes the same fingerprint from the data they received — if it doesn't match the stored one, they know the data got corrupted somewhere along
+ the way, without needing to know what changed, just that something did. It's the same idea as a checksum on a package label — cheap to verify, catches accidental corruption (not intentional tampering — that's what cryptographic hashes are for, a different concept).
+
+The three chunks you actually need:
+1. IHDR (header, always first, exactly 13 bytes of data):
+width(4B) height(4B) bit_depth(1B) color_type(1B) compression(1B) filter(1B) interlace(1B)
+For a simple RGB image: bit_depth=8, color_type=2 (RGB), compression=0, filter=0, interlace=0.
+2. IDAT (the actual pixel data, zlib-compressed). This is the part people trip on — see below.
+3. IEND (marks the end, zero-length data).
+
+Filters
+filter 0 filters 1–4 (Sub/Up/Average/Paeth)
+CRC (Cyclic Redundancy Check)
+
+2. Bresenham line + midpoint circle
+
+Bresenham's line algorithm draws a line using only integer arithmetic — no floating point, no rounding errors. The trick: track an error term representing how far the ideal line has drifted from the current pixel row. Step x by 1 each iteration; accumulate error by dy; whenever error exceeds half a pixel, step y too and correct the error back down. This is the same idea used in real GPU rasterizers.
+
+Midpoint circle does the analogous thing for circles, exploiting 8-way symmetry — compute one octant's pixels using a decision parameter (an integer that tells you whether to step to the pixel directly right (E) or diagonally right-down (NE)), then mirror those coordinates into the other 7 octants. You computeect the rest. in isolation by writing just signature+IHDR+IEND (a valid but empty-image PNG) and opening it in an image viewer or PIL.Image.open (just to verify,  not as a dependency of 2. Write the scanline lter 0 only — literally just prepend a zero byte to each row).
+3. zlib-compress the filtered buffer, wrap it in one IDAT chunk.
+4. Assemble signature + IHDR + IDAT + IEND, write to disk.                 5. Verify: open the ouparately reimplementthe CRC bitwise and assert it matches zlib.crc32.
+
+Go ahead and write it — show me the code when you have a first pass and I'll review it (not rewrite it) before we move on.
+
+---
+Here's the map for the rest, so you know what's coming and how the pieces connect. We'll go deep on each when you get there, but here's the throughline:
+
+2. Bresenham line + midpoint circle
+
+Bresenham's line algorithm draws a line using only integer arithmetic — no floating point, no rounding errors. The trick: track an error term         representing how far tm the current pixel row. Step x by 1 each y dy; whenever errorexceeds half a pixel, step y too and correct the error back down. This is the same idea used in real GPU rasterizers.
+Midpoint circle does ts, exploiting 8-waysymmetry — compute one octant's pixels using a decision parameter (an integer that tells you whether to step to the pixel directly right (E) or diagonally right-down (NE)), then mirror those coordinates into the other 7 octants. You compute 1/8th of the circle and reflect the rest.
+
+3. Perlin noise + fBm
+
+Perlin noise is gradient noise: at each integer lattice point, assign a pseudorandom direction vector (not a value). For any query point, take the dot product of "vector from each of the 4 surrounding corners to the point" with "that corner's gradient" — this gives four numbers, one per corner. Blend them together using the quintic fade curve 6t⁵−15t⁴+10t³     instead of linear inteerpolation createsvisible creases at cell boundaries (its second derivative is discontinuous); the quintic curve has zero first and second derivative at the cell edges, so the result looks smooth under lighting too.            
+fBm (fractal Brownian motion) just layers multiple octaves of this noise at different frequencies/amplitudes: Σ amplitude^i * noise(frequency^i * p). Low octaves give big rolling shapes (mountains), high octaves add fine detail (rocky texture). This is literally how most procedural terrain in games is built.
+
+4. SDF primitives + smooth-min
+
+A signed distance field is a function f(point) → distance to nearest surface, negative when inside the shape. sdCircle(p, r) = length(p) - r is the simplest example — trivially, distance from center minus radius. The   powerful part is compos two shapes (the point belongs to whichever is closer), and smin (smooth minimum) does the same thing but blends the seam organically instead of leaving a hard crease — controlled by a blend-width parameter k. This is how you get things like a mountain range that merges smoothly instead of terrain that looks like two shapes glued together.                                                
+5. HSV↔RGB + palette from prompt
+HSV separates what colid (saturation) and how bright (value) — much easier to reason about than RGB when you want "make this warmer" or "make this darker." The conversion formula walks around the color wheel in 60° hextants. The prompt-to-palette mapping is just a   dictionary lookup: keybase hue, then harmonyrules (complementary = opposite side of the wheel, analogous = neighboring hues) generate a small coherent palette from that one hue.
+
+6. Scene compositor / alpha-over
+
+Layers get drawn back-to-front and blended with the classic "over" operator: out = src·α + dst·(1-α). Sky first, then distant terrain (with fog blended in based on depth), then closer terrain, then water, then clouds on top. Depth fog itself is mix(color, fog_color, 1 - exp(-density * depth)) — an exponential falloff, which is physically how light scatters through atmosphere ove
+
+7. Bitmap font
+
+The simplest possible text rendering: each character glyph is a small fixed grid (e.g. 8×8) where each bit says "pixel on or off." You hardcode these bit patterns for the letters you need, then "blit" (copy) the
+pattern onto the imagedraw text, checkingeach bit and writing the text color if set. No curve math, no font files — just lookup tables.
