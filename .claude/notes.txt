@@ -107,3 +107,24 @@ Layers get drawn back-to-front and blended with the classic "over" operator: out
 
 The simplest possible text rendering: each character glyph is a small fixed grid (e.g. 8×8) where each bit says "pixel on or off." You hardcode these bit patterns for the letters you need, then "blit" (copy) the
 pattern onto the imagedraw text, checkingeach bit and writing the text color if set. No curve math, no font files — just lookup tables.
+
+A PNG file is just two things stacked together:
+An 8-byte signature so software can recognize the file.
+A sequence of chunks, each with the same envelope: length | type | data | CRC.
+
+PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
+\x89 — has the high bit set, so if the file goes through a transfer that strips to 7 bits, it gets corrupted visibly instead of silently.
+PNG — ASCII, so you can see what it is in a hex dump.
+\r\n — catches a transfer that converts CRLF to LF.
+\x1a — DOS end-of-file character. If you type file.png on Windows, output stops here instead of spraying binary at your terminal.
+\n — catches conversion in the other direction.
+
+ihdr_data = struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)
+Value        Field                                                  Meaning        
+width   Width             image width in pixels (4-byte int)                                                            
+height  Height            image height in pixels (4-byte int)                                                           
+8           Bit depth         bits per channel — 8 means each R/G/B value is 0–255                                          
+2           Color type        2 = truecolor (RGB, no palette, no alpha). Other values: 0=grayscale, 3=palette, 4=grayscale+alpha, 6=RGBA                                                                     
+0           Compression       must always be 0 (only zlib/deflate is defined by the spec)  method                                                                                                        
+0           Filter method     must always be 0 (only the standard adaptive filtering is defined)                        
+0           Interlace method  0 = no interlacing (image stored top-to-bottom, non-interlaced); 1 would mean Adam7            
