@@ -128,3 +128,76 @@ height  Height            image height in pixels (4-byte int)
 0           Compression       must always be 0 (only zlib/deflate is defined by the spec)  method                                                                                                        
 0           Filter method     must always be 0 (only the standard adaptive filtering is defined)                        
 0           Interlace method  0 = no interlacing (image stored top-to-bottom, non-interlaced); 1 would mean Adam7            
+
+
+
+
+4. What's an "octant" then?
+
+Since one computed point gives you 8 points for free, you only ever need to compute 1/8th of the circle's points — the algorithm does real work for one slice, and the other 7 slices are just free mirrors.
+
+Think of the circle like a clock face cut into 8 equal pie slices (each 45°, since 360° / 8 = 45°). Each slice is an octant. The algorithm computes one octant — conventionally the slice from straight up (12 o'clock, angle 0°) sweeping down to the 45° diagonal (roughly the 1:30 position). That's the arc where, as you move along it, x is always less than or equal to y.
+
+Why stop at 45°? Because past that point, you'd just be computing the mirror image of pixels you already have — continuing would be redundant work.
+
+5. Walking the octant: the decision parameter
+
+Inside that one octant, here's the situation at each step: you know you're moving from left to right (x always increases by exactly 1 each step — that part's not a decision). The only question each step is: does y stay the same, or does y also decrease by 1?
+
+- Moving only in x (y unchanged) → call this the "E" move (East)
+- Moving in x and decreasing y → call this the "SE" move (Southeast)
+
+To decide, the algorithm checks: between these two candidate pixels, which one is closer to where the true circle actually passes? It does this by testing the midpoint between the two candidates (hence the algorithm's name) against the circle equation x² + y² - r²:
+
+- If that midpoint falls inside the true circle (the expression is negative) → the real curve is farther out than the midpoint → the "E" pixel is the better match.
+- If the midpoint falls on or outside the true circle → the real curve has already curved inward → the "SE" pixel is the better match.
+
+This test reduces to simple integer addition/subtraction updates each step (just like Bresenham's line — no floating point, no square roots, ever), tracked in a running value usually called p (the decision parameter).
+
+6. A concrete worked example (so this isn't abstract)
+
+Let's trace it by hand for radius r = 5, starting at the top of the circle: x = 0, y = r = 5, and an initial decision value p = 1 - r = -4.
+
+Rule each step:
+- x = x + 1 (always)
+- if p < 0: choose E → p = p + 2x + 1, y unchanged
+- else: choose S
+│ step  │  x  │ p before │ decision │ y after │ p after │   plotted point    │
+├───────┼─────┼──────────┼──────────┼─────────┼─────────┼────────────────────┤
+│ start │ 0   │ -4       │ —        │ 5       │ -4      │ (0, 5)             │
+├───────┼─────┼──────────┼──────────┼─────────┼─────────┼────────────────────┤
+│ 1     │ 1   │ -4       │ E (p<0)  │ 5       │ -1      │ (1, 5)             │
+├───────┼─────┼──────────┼──────────┼─────────┼─────────┼────────────────────┤
+│ 2     │ 2   │ -1       │ E (p<0)  │ 5       │ 4       │ (2, 5)             │
+├───────┼─────┼──────────┼──────────┼─────────┼─────────┼────────────────────┤
+│ 3     │ 3   │ 4        │ SE       │ 4       │ 3       │ (3, 4)             │
+├───────┼─────┼──────────┼──────────┼─────────┼─────────┼────────────────────┤
+│ 4     │ 4   │ 3        │ SE       │ 3       │ 6       │ (4, 3) → x≥y, stop │
+└───────┴─────┴──────────┴──────────┴─────────┴─────────┴────────────────────┘
+
+Check the results against the real equation x²+y²=25: (3,4) → 9+16=25 exact. (4,3) → 16+9=25 exact. Those land exactly on the circle — not a coincidence, 3-4-5 is a famous Pythagorean triple, which is why r=5 makes a clean hand example.
+
+7. Putting it together: from one octant to a full circle
+
+For every (x, y) you compute in that octant, immediately plot all 8 mirrored points (this time adding the real center back in, cx, cy):
+
+(cx+x, cy+y)   (cx-x, cy+y)   (cx+x, cy-y)   (cx-x, cy-y)
+(cx+y, cy+x)   (cx-y, cy+x)   (cx+y, cy-x)   (cx-y, cy-x)
+
+Do that for every point the loop produces, and you've drawn the entire circle outline — using nothing but integer addition and subtraction.
+
+8. Your spec to implement (write this yourself, same pattern as your Bresenham comment block)
+
+def midpoint_circle(cx, cy, r):
+    1. Set x = 0, y = r, p = 1 - r.
+    2. Start a results list.
+    3. Plot all 8 symmetric points for the current (x, y) into results (add cx, cy).
+    4. Loop while x < y:
+         a. x = x + 1
+         b. if p < 0: p = p + 2*x + 1   (E move, y unchanged)
+            else:     y = y - 1
+                      p = p + 2*x - 2*y + 1   (SE move)
+         c. Plot all 8 symmetric points for the new (x, y) into results.
+    5. Return results.
+
+Try coding that, then run it for a small radius (try r=5 like the example above) and compare the output against the table — if it matches, you know it's correct before you ever draw it to a PNG.

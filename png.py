@@ -51,9 +51,9 @@ def bresenham_line_simple(x0,y0,x1,y1):
     return result
 
 if __name__ == '__main__':
-    # width , height = 250,250
-    # red = (220,40,40)
-    # pixels = [[red for _ in range(width)] for _ in range(height)]
-    # write_png('red.png',width,height,pixels)
+    width , height = 250,250
+    red = (220,40,40)
+    pixels = [[red for _ in range(width)] for _ in range(height)]
+    write_png('red.png',width,height,pixels)
     result = bresenham_line_simple(0, 0, 5, 2)
     print(result)  
